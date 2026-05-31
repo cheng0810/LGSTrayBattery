@@ -65,20 +65,40 @@ namespace LGSTrayHID
                     if (successCount >= successThresh) { break; }
                 }
 
-                if (successCount < successThresh) { return; }
+                if (successCount < successThresh)
+                {
+                    Log.WriteLine($"Device index {_deviceIdx} failed HID++ ping sync");
+                    return;
+                }
 
                 // Find 0x0001 IFeatureSet
                 ret = await _parent.WriteRead20(_parent.DevShort, new byte[7] { 0x10, _deviceIdx, 0x00, 0x00 | SW_ID, 0x00, 0x01, 0x00 });
+                if (ret.Length == 0)
+                {
+                    Log.WriteLine($"Device index {_deviceIdx} did not return IFeatureSet index");
+                    return;
+                }
                 _featureMap[0x0001] = ret.GetParam(0);
 
                 // Get Feature Count
                 ret = await _parent.WriteRead20(_parent.DevShort, new byte[7] { 0x10, _deviceIdx, _featureMap[0x0001], 0x00 | SW_ID, 0x00, 0x00, 0x00 });
+                if (ret.Length == 0)
+                {
+                    Log.WriteLine($"Device index {_deviceIdx} did not return feature count");
+                    return;
+                }
                 int featureCount = ret.GetParam(0);
+                Log.WriteLine($"Device index {_deviceIdx} reports {featureCount} feature(s)");
 
                 // Enumerate Features
                 for (byte i = 0; i <= featureCount; i++)
                 {
                     ret = await _parent.WriteRead20(_parent.DevShort, new byte[7] { 0x10, _deviceIdx, _featureMap[0x0001], 0x10 | SW_ID, i, 0x00, 0x00 });
+                    if (ret.Length == 0)
+                    {
+                        Log.WriteLine($"Device index {_deviceIdx} feature slot {i} returned no response");
+                        continue;
+                    }
                     ushort featureId = (ushort)((ret.GetParam(0) << 8) + ret.GetParam(1));
 
                     _featureMap[featureId] = i;
@@ -102,6 +122,11 @@ namespace LGSTrayHID
             if (_featureMap.TryGetValue(0x0005, out featureId))
             {
                 ret = await _parent.WriteRead20(_parent.DevShort, new byte[7] { 0x10, _deviceIdx, featureId, 0x00 | SW_ID, 0x00, 0x00, 0x00 });
+                if (ret.Length == 0)
+                {
+                    Log.WriteLine($"Device index {_deviceIdx} did not return a device-name length");
+                    return;
+                }
                 int nameLength = ret.GetParam(0);
 
                 string name = "";
@@ -109,6 +134,11 @@ namespace LGSTrayHID
                 while (name.Length < nameLength)
                 {
                     ret = await _parent.WriteRead20(_parent.DevShort, new byte[7] { 0x10, _deviceIdx, featureId, 0x10 | SW_ID, (byte)name.Length, 0x00, 0x00 });
+                    if (ret.Length == 0)
+                    {
+                        Log.WriteLine($"Device index {_deviceIdx} did not return device-name bytes at offset {name.Length}");
+                        return;
+                    }
                     name += Encoding.UTF8.GetString(ret.GetParams());
                 }
 
@@ -124,17 +154,28 @@ namespace LGSTrayHID
                 };
 
                 ret = await _parent.WriteRead20(_parent.DevShort, new byte[7] { 0x10, _deviceIdx, featureId, 0x20 | SW_ID, 0x00, 0x00, 0x00 });
+                if (ret.Length == 0)
+                {
+                    Log.WriteLine($"{DeviceName} did not return a device type");
+                    return;
+                }
                 DeviceType = ret.GetParam(0);
             }
             else
             {
                 // Device does not have a name/Hidpp error ignore it
+                Log.WriteLine($"Device index {_deviceIdx} does not expose feature 0x0005 device name");
                 return;
             }
 
             if (_featureMap.TryGetValue(0x0003, out featureId))
             {
                 ret = await _parent.WriteRead20(_parent.DevShort, new byte[7] { 0x10, _deviceIdx, featureId, 0x00 | SW_ID, 0x00, 0x00, 0x00 });
+                if (ret.Length < 19)
+                {
+                    Log.WriteLine($"{DeviceName} did not return enough device-info bytes");
+                    return;
+                }
 
                 string unitId = BitConverter.ToString(ret.GetParams().ToArray(), 1, 4).Replace("-", string.Empty);
                 string modelId = BitConverter.ToString(ret.GetParams().ToArray(), 7, 5).Replace("-", string.Empty);
@@ -144,6 +185,11 @@ namespace LGSTrayHID
                 if (serialNumberSupported)
                 {
                     ret = await _parent.WriteRead20(_parent.DevShort, new byte[7] { 0x10, _deviceIdx, featureId, 0x20 | SW_ID, 0x00, 0x00, 0x00 });
+                    if (ret.Length < 15)
+                    {
+                        Log.WriteLine($"{DeviceName} did not return a serial number");
+                        return;
+                    }
                     serialNumber = BitConverter.ToString(ret.GetParams().ToArray(), 0, 11).Replace("-", string.Empty);
                 }
 
@@ -181,6 +227,7 @@ namespace LGSTrayHID
                 { } when FeatureMap.ContainsKey(0x1004) => Battery1004.GetBatteryAsync,
                 _ => null
             };
+            Log.WriteLine($"{DeviceName} battery feature: {(_getBatteryAsync == null ? "none" : "found")}");
 
             HidppManagerContext.Instance.SignalDeviceEvent(
                 IPCMessageType.INIT,
@@ -224,7 +271,7 @@ namespace LGSTrayHID
             var batStatus = ret.Value;
             lastUpdate = DateTimeOffset.Now;
 
-            if (forceIpcUpdate || (batStatus == lastBatteryReturn))
+            if (!forceIpcUpdate && (batStatus == lastBatteryReturn))
             {
                 // Don't report if no change
                 return;

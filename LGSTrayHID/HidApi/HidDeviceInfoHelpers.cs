@@ -29,7 +29,7 @@ namespace LGSTrayHID.HidApi
         {
             unsafe
             {
-                if ((deviceInfo.UsagePage & 0xFF00) == 0xFF00)
+                if (deviceInfo.UsagePage == 0xFF00)
                 {
                     return deviceInfo.Usage switch
                     {

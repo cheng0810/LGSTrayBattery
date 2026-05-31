@@ -25,6 +25,14 @@ namespace LGSTrayHID
 
         }
 
+        private static void Log(string message)
+        {
+            System.Diagnostics.Debug.WriteLine(message);
+#if DEBUG
+            Console.WriteLine(message);
+#endif
+        }
+
         static HidppManagerContext()
         {
             _ = HidInit();
@@ -52,6 +60,7 @@ namespace LGSTrayHID
             {
                 case HidppMessageType.NONE:
                 case HidppMessageType.VERY_LONG:
+                    Log($"Skipping HID device: VID_{deviceInfo.VendorId:X04}&PID_{deviceInfo.ProductId:X04} usagePage=0x{deviceInfo.UsagePage:X04} usage=0x{deviceInfo.Usage:X04}");
                     return 0;
             }
 
@@ -59,6 +68,8 @@ namespace LGSTrayHID
 
             HidDevicePtr dev = HidOpenPath(ref deviceInfo);
             _ = HidWinApiGetContainerId(dev, out Guid containerId);
+
+            Log($"Initializing HID++ {messageType}: VID_{deviceInfo.VendorId:X04}&PID_{deviceInfo.ProductId:X04} interface={deviceInfo.InterfaceNumber} usagePage=0x{deviceInfo.UsagePage:X04} usage=0x{deviceInfo.Usage:X04} container={containerId}");
 
 #if DEBUG
             Console.WriteLine(devPath);

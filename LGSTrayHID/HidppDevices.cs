@@ -49,6 +49,14 @@ namespace LGSTrayHID
 
         public HidppDevices() { }
 
+        private static void Log(string message)
+        {
+            System.Diagnostics.Debug.WriteLine(message);
+#if DEBUG
+            Console.WriteLine(message);
+#endif
+        }
+
         public void Dispose()
         {
             Dispose(disposing: true);
@@ -75,7 +83,9 @@ namespace LGSTrayHID
         { 
             if (_devShort != IntPtr.Zero)
             {
-                throw new ReadOnlyException();
+                Log("Ignoring duplicate HID++ short endpoint");
+                HidClose(devShort);
+                return;
             }
             _devShort = devShort;
             await SetUp();
@@ -85,7 +95,9 @@ namespace LGSTrayHID
         {
             if (_devLong != IntPtr.Zero)
             {
-                throw new ReadOnlyException();
+                Log("Ignoring duplicate HID++ long endpoint");
+                HidClose(devLong);
+                return;
             }
             _devLong = devLong;
             await SetUp();
@@ -119,6 +131,7 @@ namespace LGSTrayHID
             if ((buffer[2] == 0x41) && ((buffer[4] & 0x40) == 0))
             {
                 byte deviceIdx = buffer[1];
+                Log($"HID++ device arrival announce: index={deviceIdx}");
                 if (true || !_deviceCollection.ContainsKey(deviceIdx))
                 {
                     _deviceCollection[deviceIdx] = new(this, deviceIdx);
@@ -287,12 +300,14 @@ namespace LGSTrayHID
         {
             if ((_devShort == IntPtr.Zero) || (_devLong == IntPtr.Zero))
             {
+                Log($"Waiting for HID++ endpoints: short={_devShort != IntPtr.Zero}, long={_devLong != IntPtr.Zero}");
                 return;
             }
             
 #if DEBUG
             Console.WriteLine("Device ready");
 #endif
+            Log("HID++ endpoints ready");
 
             Thread t1 = new(async () => { await ReadThread(_devShort, 7); })
             {
@@ -311,10 +326,16 @@ namespace LGSTrayHID
             // Read number of devices on reciever
             ret = await WriteRead10(_devShort, [0x10, 0xFF, 0x81, 0x02, 0x00, 0x00, 0x00], 1000);
             byte numDeviceFound = 0;
-            if ((ret[2] == 0x81) && (ret[3] == 0x02))
+            if ((ret.Length > 5) && (ret[2] == 0x81) && (ret[3] == 0x02))
             {
                 numDeviceFound = ret[5];
             }
+            else
+            {
+                Log("Receiver device-count query returned no usable response");
+            }
+
+            Log($"Receiver reports {numDeviceFound} device(s)");
 
             if (numDeviceFound > 0)
             {
@@ -324,16 +345,20 @@ namespace LGSTrayHID
 
             await Task.Delay(500);
 
-            if (_deviceCollection.Count == 0)
+            if ((numDeviceFound > 0) || (_deviceCollection.Count == 0))
             {
-                // Fail to enumerate devices
+                // Some receivers do not send arrival announces reliably; ping known slots.
                 for (byte i = 1; i <= 6; i++)
                 {
                     var ping = await Ping20(i, 100, false);
+                    Log($"HID++ ping device index {i}: {ping}");
                     if (ping)
                     {
                         var deviceIdx = i;
-                        _deviceCollection[deviceIdx] = new(this, deviceIdx);
+                        if (!_deviceCollection.ContainsKey(deviceIdx))
+                        {
+                            _deviceCollection[deviceIdx] = new(this, deviceIdx);
+                        }
                     }
                 }
 
