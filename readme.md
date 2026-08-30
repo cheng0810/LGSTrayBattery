@@ -37,10 +37,19 @@ The intended local configuration is `GHub.enabled = false` and `Native.enabled =
 
 ### First improvement batch
 
-- [ ] Keep the UI and HID publish outputs isolated so `LGSTrayHID.exe` cannot be overwritten by the UI build.
-- [ ] Add a repeatable installer for the stable local path and update the startup entry.
-- [ ] Let Rainmeter select the mouse by device name instead of a generated device ID.
-- [ ] Expose data freshness in the API and show an offline state instead of a misleading `0%`.
+- [x] Keep the UI and HID publish outputs isolated so `LGSTrayHID.exe` cannot be overwritten by the UI build.
+- [x] Add a repeatable installer for the stable local path and update the startup entry.
+- [x] Let Rainmeter select the mouse by device name instead of a generated device ID.
+- [x] Expose data freshness in the API and show an offline state instead of a misleading `0%`.
+
+To rebuild and install the standalone package locally:
+
+```powershell
+python .\publish.py --no-zip
+.\install.ps1
+```
+
+`install.ps1` preserves an existing `%LOCALAPPDATA%\LGSTrayBattery\appsettings.toml`, replaces the installed binaries, updates `LGSTrayGUI` in the current-user startup registry key, and starts the application. The script intentionally accepts only the documented local installation target.
 
 This section describes the fork-specific state. The remaining sections are the upstream usage and feature documentation.
 
@@ -105,6 +114,8 @@ IPv6 can also be disabled with `useIpv6` in the event that dual stack networking
 
 If any issues arise from running the server, it can be turned off by the `enable` value in `appsettings.toml` under `[HTTPServer]`.
 
+`staleAfterSeconds` controls when the API reports a device as offline. This fork defaults to 1200 seconds, which is longer than the default 600-second Native polling period. An uninitialized device reports `online=False` and `data_age_seconds=-1` until its first successful battery update.
+
 ![image](Assets/server_index.png)
 
 Visit `http://{addr}:{port}/` on your browser to view the list of devices available.
@@ -124,6 +135,8 @@ Device ids starting with `dev` originates from tapping into Logitech GHUB's own 
 | battery_voltage | ❌   | ✔️**   |
 | mileage***      | ✔️   | ❌     |
 | charging        | ✔️   | ✔️     |
+| online          | ✔️   | ✔️     |
+| data_age_seconds| ✔️   | ✔️     |
 
 \* - Requires Logitech G Hub Installed
 

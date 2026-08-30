@@ -20,6 +20,7 @@ public class HttpServerSettings
 {
     public bool Enabled { get; set; }
     public int Port { get; set; }
+    public int StaleAfterSeconds { get; set; } = 1200;
 
     private string _addr = null!;
     public string Addr

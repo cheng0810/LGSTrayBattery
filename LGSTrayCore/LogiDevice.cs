@@ -1,6 +1,8 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using LGSTrayPrimitives;
 
+using System.Xml.Linq;
+
 namespace LGSTrayCore
 {
     public partial class LogiDevice : ObservableObject
@@ -66,21 +68,31 @@ namespace LGSTrayCore
             Console.WriteLine(ToolTipString);
         }
 
-        public string GetXmlData()
+        public string GetXmlData(int staleAfterSeconds = 1200)
         {
-            return
-                $"<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
-                $"<xml>" +
-                $"<device_id>{DeviceId}</device_id>" +
-                $"<device_name>{DeviceName}</device_name>" +
-                $"<device_type>{DeviceType}</device_type>" +
-                $"<battery_percent>{BatteryPercentage:f2}</battery_percent>" +
-                $"<battery_voltage>{BatteryVoltage:f2}</battery_voltage>" +
-                $"<mileage>{BatteryMileage:f2}</mileage>" +
-                $"<charging>{PowerSupplyStatus == PowerSupplyStatus.POWER_SUPPLY_STATUS_CHARGING}</charging>" +
-                $"<last_update>{LastUpdate}</last_update>" +
-                $"</xml>"
-                ;
+            var hasUpdate = LastUpdate != DateTimeOffset.MinValue;
+            var dataAgeSeconds = hasUpdate
+                ? Math.Max(0, (long)(DateTimeOffset.Now - LastUpdate).TotalSeconds)
+                : -1;
+            var online = hasUpdate && dataAgeSeconds <= staleAfterSeconds;
+
+            var document = new XDocument(
+                new XDeclaration("1.0", "UTF-8", null),
+                new XElement("xml",
+                    new XElement("device_id", DeviceId),
+                    new XElement("device_name", DeviceName),
+                    new XElement("device_type", DeviceType),
+                    new XElement("battery_percent", $"{BatteryPercentage:f2}"),
+                    new XElement("battery_voltage", $"{BatteryVoltage:f2}"),
+                    new XElement("mileage", $"{BatteryMileage:f2}"),
+                    new XElement("charging", (PowerSupplyStatus == PowerSupplyStatus.POWER_SUPPLY_STATUS_CHARGING).ToString()),
+                    new XElement("last_update", LastUpdate),
+                    new XElement("online", online.ToString()),
+                    new XElement("data_age_seconds", dataAgeSeconds)
+                )
+            );
+
+            return document.Declaration + document.ToString(SaveOptions.DisableFormatting);
         }
     }
 }

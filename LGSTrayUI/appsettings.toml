@@ -7,8 +7,11 @@ addr = "localhost"
 port = 12321
 useIpv6 = true
 
+# Report a device as offline when its battery data is older than this value
+staleAfterSeconds = 1200
+
 [GHub]
-enabled = true
+enabled = false
 
 [Native]
 enabled = true

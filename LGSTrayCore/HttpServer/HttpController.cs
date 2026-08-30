@@ -8,15 +8,19 @@ namespace LGSTrayCore.HttpServer;
 public class HttpControllerFactory
 {
     private readonly ILogiDeviceCollection _logiDeviceCollection;
+    private readonly int _staleAfterSeconds;
 
-    public HttpControllerFactory(ILogiDeviceCollection logiDeviceCollection)
+    public HttpControllerFactory(
+        ILogiDeviceCollection logiDeviceCollection,
+        Microsoft.Extensions.Options.IOptions<LGSTrayPrimitives.AppSettings> appSettings)
     {
         _logiDeviceCollection = logiDeviceCollection;
+        _staleAfterSeconds = appSettings.Value.HTTPServer.StaleAfterSeconds;
     }
 
     public HttpController CreateController()
     {
-        return new HttpController(_logiDeviceCollection);
+        return new HttpController(_logiDeviceCollection, _staleAfterSeconds);
     }
 }
 
@@ -24,10 +28,12 @@ public class HttpController : WebApiController
 {
     private static readonly string _assemblyVersion = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion!;
     private readonly ILogiDeviceCollection _logiDeviceCollection;
+    private readonly int _staleAfterSeconds;
 
-    public HttpController(ILogiDeviceCollection logiDeviceCollection)
+    public HttpController(ILogiDeviceCollection logiDeviceCollection, int staleAfterSeconds)
     {
         _logiDeviceCollection = logiDeviceCollection;
+        _staleAfterSeconds = staleAfterSeconds;
     }
 
     private void DefaultResponse(string contentType = "text/html")
@@ -82,6 +88,6 @@ public class HttpController : WebApiController
 
         DefaultResponse("text/xml");
 
-        tw.Write(logiDevice.GetXmlData());
+        tw.Write(logiDevice.GetXmlData(_staleAfterSeconds));
     }
 }
