@@ -73,17 +73,18 @@ namespace LGSTrayUI
 
         public void OnInitMessage(InitMessage initMessage)
         {
-            LogiDeviceViewModel? dev = Devices.SingleOrDefault(x => x.DeviceId == initMessage.deviceId);
-            if (dev != null)
+            Application.Current.Dispatcher.BeginInvoke(() =>
             {
-                Application.Current.Dispatcher.BeginInvoke(() => dev.UpdateState(initMessage));
+                var dev = Devices.SingleOrDefault(x => x.DeviceId == initMessage.deviceId);
+                if (dev != null)
+                {
+                    dev.UpdateState(initMessage);
+                    return;
+                }
 
-                return;
-            }
-
-            dev = _logiDeviceViewModelFactory.CreateViewModel((x) => x.UpdateState(initMessage));
-
-            Application.Current.Dispatcher.BeginInvoke(() => Devices.Add(dev));
+                dev = _logiDeviceViewModelFactory.CreateViewModel((x) => x.UpdateState(initMessage));
+                Devices.Add(dev);
+            });
         }
 
         public void OnUpdateMessage(UpdateMessage updateMessage)

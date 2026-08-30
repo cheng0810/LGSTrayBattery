@@ -229,10 +229,18 @@ namespace LGSTrayHID
             };
             Log.WriteLine($"{DeviceName} battery feature: {(_getBatteryAsync == null ? "none" : "found")}");
 
-            HidppManagerContext.Instance.SignalDeviceEvent(
-                IPCMessageType.INIT,
-                new InitMessage(Identifier, DeviceName, _getBatteryAsync != null, (DeviceType)DeviceType)
-            );
+            SignalInit();
+
+            _ = Task.Run(async () =>
+            {
+                for (int attempt = 0; attempt < 5; attempt++)
+                {
+                    await Task.Delay(1000);
+                    if (Parent.Disposed) { return; }
+
+                    SignalInit();
+                }
+            });
 
             await Task.Delay(1000);
 
@@ -271,6 +279,10 @@ namespace LGSTrayHID
             var batStatus = ret.Value;
             lastUpdate = DateTimeOffset.Now;
 
+            // INIT is idempotent. Re-announcing here lets the UI recover if the
+            // named-pipe connection was not ready during initial discovery.
+            SignalInit();
+
             if (!forceIpcUpdate && (batStatus == lastBatteryReturn))
             {
                 // Don't report if no change
@@ -281,6 +293,14 @@ namespace LGSTrayHID
             HidppManagerContext.Instance.SignalDeviceEvent(
                 IPCMessageType.UPDATE,
                 new UpdateMessage(Identifier, batStatus.batteryPercentage, batStatus.status, batStatus.batteryMVolt, lastUpdate)
+            );
+        }
+
+        private void SignalInit()
+        {
+            HidppManagerContext.Instance.SignalDeviceEvent(
+                IPCMessageType.INIT,
+                new InitMessage(Identifier, DeviceName, _getBatteryAsync != null, (DeviceType)DeviceType)
             );
         }
     }
