@@ -41,6 +41,7 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="System.Diagnostics.EventLog" Version="8.0.0" />
     <PackageReference Include="System.Management" Version="8.0.0" />
+    <PackageReference Include="System.Text.Json" Version="8.0.6" />
     <PackageReference Include="Tommy.Extensions.Configuration" Version="6.2.0" />
     <PackageReference Include="Websocket.Client" Version="5.0.0" />
   </ItemGroup>
