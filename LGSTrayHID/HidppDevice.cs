@@ -46,27 +46,42 @@ namespace LGSTrayHID
             {
                 Hidpp20 ret;
 
-                // Sync Ping
-                int successCount = 0;
-                int successThresh = 3;
-                for (int i = 0; i < 10; i++)
+                // A receiver can announce a sleeping device before it is ready
+                // to answer HID++ requests. Keep retrying while this receiver
+                // remains connected instead of abandoning the device slot.
+                const int successThresh = 3;
+                int successCount;
+                do
                 {
-                    var ping = await _parent.Ping20(_deviceIdx, 100);
-                    if (ping)
+                    successCount = 0;
+                    for (int i = 0; i < 10; i++)
                     {
-                        successCount++;
-                    }
-                    else
-                    {
-                        successCount = 0;
+                        var ping = await _parent.Ping20(_deviceIdx, 100);
+                        if (ping)
+                        {
+                            successCount++;
+                        }
+                        else
+                        {
+                            successCount = 0;
+                        }
+
+                        if (successCount >= successThresh) { break; }
                     }
 
-                    if (successCount >= successThresh) { break; }
+                    if (successCount < successThresh)
+                    {
+                        Log.WriteLine(
+                            $"Device index {_deviceIdx} failed HID++ ping sync; retrying in " +
+                            $"{GlobalSettings.settings.RetryTime} seconds"
+                        );
+                        await Task.Delay(GlobalSettings.settings.RetryTime * 1000);
+                    }
                 }
+                while (!Removed && !Parent.Disposed && successCount < successThresh);
 
-                if (successCount < successThresh)
+                if (Removed || Parent.Disposed)
                 {
-                    Log.WriteLine($"Device index {_deviceIdx} failed HID++ ping sync");
                     return;
                 }
 
