@@ -45,6 +45,7 @@ namespace LGSTrayCore.Managers
 
         private readonly CancellationTokenSource _cts = new();
         private CancellationTokenSource? _daemonCts;
+        private int _deviceMessageCount;
 
         private readonly IDistributedSubscriber<IPCMessageType, IPCMessage> _subscriber;
         private readonly IPublisher<IPCMessage> _deviceEventBus;
@@ -78,7 +79,22 @@ namespace LGSTrayCore.Managers
             try
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, _daemonCts.Token);
-                await proc.WaitForExitAsync(cts.Token);
+                var messageCountAtStart = Volatile.Read(ref _deviceMessageCount);
+                var processExitTask = proc.WaitForExitAsync(cts.Token);
+                var discoveryTimeoutTask = Task.Delay(TimeSpan.FromSeconds(30), cts.Token);
+                var completedTask = await Task.WhenAny(processExitTask, discoveryTimeoutTask);
+
+                if (completedTask == discoveryTimeoutTask &&
+                    !cts.IsCancellationRequested &&
+                    Volatile.Read(ref _deviceMessageCount) == messageCountAtStart)
+                {
+                    proc.Kill();
+                    await proc.WaitForExitAsync(CancellationToken.None);
+                }
+                else
+                {
+                    await processExitTask;
+                }
             }
             catch (Exception)
             {
@@ -103,6 +119,7 @@ namespace LGSTrayCore.Managers
                 IPCMessageType.INIT,
                 x =>
                 {
+                    Interlocked.Increment(ref _deviceMessageCount);
                     var initMessage = (InitMessage)x;
                     //_logiDeviceCollection.OnInitMessage(initMessage);
                     _deviceEventBus.Publish(initMessage);
@@ -114,6 +131,7 @@ namespace LGSTrayCore.Managers
                 IPCMessageType.UPDATE,
                 x =>
                 {
+                    Interlocked.Increment(ref _deviceMessageCount);
                     var updateMessage = (UpdateMessage)x;
                     //_logiDeviceCollection.OnUpdateMessage(updateMessage);
                     _deviceEventBus.Publish(updateMessage);
