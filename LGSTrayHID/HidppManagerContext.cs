@@ -126,6 +126,18 @@ namespace LGSTrayHID
                 {
                     if (_deviceMap.Remove(containerId, out var devices))
                     {
+                        foreach (var device in devices.GetDeviceSnapshot())
+                        {
+                            device.MarkRemoved();
+                            if (!string.IsNullOrEmpty(device.Identifier))
+                            {
+                                SignalDeviceEvent(
+                                    IPCMessageType.REMOVE,
+                                    new RemoveMessage(device.Identifier, DeviceDisconnectReason.Removed)
+                                );
+                            }
+                        }
+
                         devices.Dispose();
                     }
 

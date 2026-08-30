@@ -21,9 +21,20 @@ namespace LGSTrayUI;
 /// </summary>
 public partial class App : Application
 {
+    private const string InstanceMutexName = @"Local\LGSTrayBattery.UI";
+    private Mutex? _instanceMutex;
+    private bool _ownsInstanceMutex;
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        _instanceMutex = new Mutex(true, InstanceMutexName, out _ownsInstanceMutex);
+        if (!_ownsInstanceMutex)
+        {
+            Shutdown();
+            return;
+        }
 
         Directory.SetCurrentDirectory(AppContext.BaseDirectory);
         DiagnosticLog.Initialize("LGSTray");
@@ -59,6 +70,16 @@ public partial class App : Application
         await host.RunAsync();
         DiagnosticLog.WriteLine("UI host stopped");
         Dispatcher.InvokeShutdown();
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        if (_ownsInstanceMutex)
+        {
+            _instanceMutex?.ReleaseMutex();
+        }
+        _instanceMutex?.Dispose();
+        base.OnExit(e);
     }
 
     static async Task LoadAppSettings(Microsoft.Extensions.Configuration.ConfigurationManager config)

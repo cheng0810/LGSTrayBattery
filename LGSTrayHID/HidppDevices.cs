@@ -1,4 +1,5 @@
 ﻿using LGSTrayHID.HidApi;
+using LGSTrayPrimitives.MessageStructs;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -24,6 +25,14 @@ namespace LGSTrayHID
         private readonly Dictionary<ushort, HidppDevice> _deviceCollection = [];
         private readonly object _deviceCollectionLock = new();
         public IReadOnlyDictionary<ushort, HidppDevice> DeviceCollection => _deviceCollection;
+
+        public IReadOnlyCollection<HidppDevice> GetDeviceSnapshot()
+        {
+            lock (_deviceCollectionLock)
+            {
+                return _deviceCollection.Values.ToArray();
+            }
+        }
 
         private readonly SemaphoreSlim _semaphore = new(1, 1);
         private readonly Channel<byte[]> _channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(5)
@@ -127,9 +136,16 @@ namespace LGSTrayHID
 
         private async Task ProcessMessgage(byte[] buffer)
         {
-            if ((buffer[2] == 0x41) && ((buffer[4] & 0x40) == 0))
+            if (buffer[2] == 0x41)
             {
                 byte deviceIdx = buffer[1];
+                if ((buffer[4] & 0x40) != 0)
+                {
+                    Log($"HID++ device removal announce: index={deviceIdx}");
+                    RemoveDevice(deviceIdx, DeviceDisconnectReason.Removed);
+                    return;
+                }
+
                 Log($"HID++ device arrival announce: index={deviceIdx}");
                 HidppDevice? device = null;
                 lock (_deviceCollectionLock)
@@ -160,6 +176,29 @@ namespace LGSTrayHID
             else
             {
                 await _channel.Writer.WriteAsync(buffer);
+            }
+        }
+
+        private void RemoveDevice(byte deviceIdx, DeviceDisconnectReason reason)
+        {
+            HidppDevice? device;
+            lock (_deviceCollectionLock)
+            {
+                _deviceCollection.Remove(deviceIdx, out device);
+            }
+
+            if (device == null)
+            {
+                return;
+            }
+
+            device.MarkRemoved();
+            if (!string.IsNullOrEmpty(device.Identifier))
+            {
+                HidppManagerContext.Instance.SignalDeviceEvent(
+                    IPCMessageType.REMOVE,
+                    new RemoveMessage(device.Identifier, reason)
+                );
             }
         }
 

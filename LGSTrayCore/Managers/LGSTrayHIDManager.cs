@@ -3,6 +3,7 @@ using LGSTrayPrimitives;
 using MessagePipe;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 
 namespace LGSTrayCore.Managers
@@ -45,8 +46,11 @@ namespace LGSTrayCore.Managers
 
         private readonly CancellationTokenSource _cts = new();
         private CancellationTokenSource? _daemonCts;
-        private int _deviceMessageCount;
+        private readonly ConcurrentDictionary<string, byte> _activeDeviceIds = new();
         private long _lastDeviceMessageUnixMilliseconds;
+        private long _lastBackendHeartbeatUnixMilliseconds;
+        private int _backendHeartbeatProcessId;
+        private int _deviceDiscoveryCompleted;
         private readonly TimeSpan _messageStaleTimeout;
 
         private readonly IDistributedSubscriber<IPCMessageType, IPCMessage> _subscriber;
@@ -66,7 +70,7 @@ namespace LGSTrayCore.Managers
             );
         }
 
-        private async Task MonitorDaemonHealth(Process proc, int messageCountAtStart, CancellationToken cancellationToken)
+        private async Task MonitorDaemonHealth(Process proc, CancellationToken cancellationToken)
         {
             var startedAt = DateTimeOffset.UtcNow;
 
@@ -74,13 +78,41 @@ namespace LGSTrayCore.Managers
             {
                 await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
 
-                var messageCount = Volatile.Read(ref _deviceMessageCount);
                 var now = DateTimeOffset.UtcNow;
-                if (messageCount == messageCountAtStart)
+                var heartbeatProcessId = Volatile.Read(ref _backendHeartbeatProcessId);
+                if (heartbeatProcessId != proc.Id)
                 {
                     if (now - startedAt >= TimeSpan.FromSeconds(30))
                     {
-                        DiagnosticLog.WriteLine($"HID watchdog restarting pid={proc.Id}: no device IPC received within 30 seconds");
+                        DiagnosticLog.WriteLine($"HID watchdog restarting pid={proc.Id}: no backend heartbeat received within 30 seconds");
+                        proc.Kill();
+                        return;
+                    }
+
+                    continue;
+                }
+
+                var lastHeartbeatAt = DateTimeOffset.FromUnixTimeMilliseconds(
+                    Interlocked.Read(ref _lastBackendHeartbeatUnixMilliseconds)
+                );
+                if ((now - lastHeartbeatAt).TotalSeconds >= HeartbeatMessage.StaleAfterSeconds)
+                {
+                    DiagnosticLog.WriteLine(
+                        $"HID watchdog restarting pid={proc.Id}: backend heartbeat stale for " +
+                        $"{(now - lastHeartbeatAt).TotalSeconds:f0} seconds"
+                    );
+                    proc.Kill();
+                    return;
+                }
+
+                if (_activeDeviceIds.IsEmpty)
+                {
+                    if (Volatile.Read(ref _deviceDiscoveryCompleted) == 0 &&
+                        now - startedAt >= TimeSpan.FromSeconds(30))
+                    {
+                        DiagnosticLog.WriteLine(
+                            $"HID watchdog restarting pid={proc.Id}: backend heartbeat is healthy but no device initialized within 30 seconds"
+                        );
                         proc.Kill();
                         return;
                     }
@@ -94,8 +126,8 @@ namespace LGSTrayCore.Managers
                 if (now - lastMessageAt >= _messageStaleTimeout)
                 {
                     DiagnosticLog.WriteLine(
-                        $"HID watchdog restarting pid={proc.Id}: no device IPC for {(now - lastMessageAt).TotalSeconds:f0} seconds " +
-                        $"(limit={_messageStaleTimeout.TotalSeconds:f0})"
+                        $"HID watchdog restarting pid={proc.Id}: backend heartbeat is healthy but device IPC is stale for " +
+                        $"{(now - lastMessageAt).TotalSeconds:f0} seconds (limit={_messageStaleTimeout.TotalSeconds:f0})"
                     );
                     proc.Kill();
                     return;
@@ -103,14 +135,32 @@ namespace LGSTrayCore.Managers
             }
         }
 
-        private void RecordDeviceMessage(string description)
+        private void RecordDeviceMessage(string deviceId, string description)
         {
-            Interlocked.Increment(ref _deviceMessageCount);
+            _activeDeviceIds[deviceId] = 0;
+            Volatile.Write(ref _deviceDiscoveryCompleted, 1);
             Interlocked.Exchange(
                 ref _lastDeviceMessageUnixMilliseconds,
                 DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             );
             DiagnosticLog.WriteLine($"Received native HID {description}");
+        }
+
+        private void RecordBackendHeartbeat(HeartbeatMessage heartbeatMessage)
+        {
+            Volatile.Write(ref _backendHeartbeatProcessId, heartbeatMessage.processId);
+            Interlocked.Exchange(
+                ref _lastBackendHeartbeatUnixMilliseconds,
+                heartbeatMessage.sentAt.ToUnixTimeMilliseconds()
+            );
+        }
+
+        private void RecordDeviceRemoval(RemoveMessage removeMessage)
+        {
+            _activeDeviceIds.TryRemove(removeMessage.deviceId, out _);
+            DiagnosticLog.WriteLine(
+                $"Received native HID REMOVE: {removeMessage.deviceId} reason={removeMessage.reason}"
+            );
         }
 
         private async Task<int> DaemonLoop()
@@ -128,15 +178,18 @@ namespace LGSTrayCore.Managers
                 UseShellExecute = true,
                 CreateNoWindow = true
             };
+            _activeDeviceIds.Clear();
+            Volatile.Write(ref _deviceDiscoveryCompleted, 0);
+            Volatile.Write(ref _backendHeartbeatProcessId, 0);
+            Interlocked.Exchange(ref _lastBackendHeartbeatUnixMilliseconds, 0);
             proc.Start();
             DiagnosticLog.WriteLine($"Started native HID service pid={proc.Id}");
 
             try
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, _daemonCts.Token);
-                var messageCountAtStart = Volatile.Read(ref _deviceMessageCount);
                 var processExitTask = proc.WaitForExitAsync(cts.Token);
-                var watchdogTask = MonitorDaemonHealth(proc, messageCountAtStart, cts.Token);
+                var watchdogTask = MonitorDaemonHealth(proc, cts.Token);
                 var completedTask = await Task.WhenAny(processExitTask, watchdogTask);
 
                 if (completedTask == watchdogTask)
@@ -191,7 +244,7 @@ namespace LGSTrayCore.Managers
                 x =>
                 {
                     var initMessage = (InitMessage)x;
-                    RecordDeviceMessage($"INIT: {initMessage.deviceName} ({initMessage.deviceId})");
+                    RecordDeviceMessage(initMessage.deviceId, $"INIT: {initMessage.deviceName} ({initMessage.deviceId})");
                     //_logiDeviceCollection.OnInitMessage(initMessage);
                     _deviceEventBus.Publish(initMessage);
                 },
@@ -203,9 +256,31 @@ namespace LGSTrayCore.Managers
                 x =>
                 {
                     var updateMessage = (UpdateMessage)x;
-                    RecordDeviceMessage($"UPDATE: {updateMessage.deviceId} battery={updateMessage.batteryPercentage:f0}%");
+                    RecordDeviceMessage(updateMessage.deviceId, $"UPDATE: {updateMessage.deviceId} battery={updateMessage.batteryPercentage:f0}%");
                     //_logiDeviceCollection.OnUpdateMessage(updateMessage);
                     _deviceEventBus.Publish(updateMessage);
+                },
+                cancellationToken
+            );
+
+            var sub3 = await _subscriber.SubscribeAsync(
+                IPCMessageType.HEARTBEAT,
+                x =>
+                {
+                    var heartbeatMessage = (HeartbeatMessage)x;
+                    RecordBackendHeartbeat(heartbeatMessage);
+                    _deviceEventBus.Publish(heartbeatMessage);
+                },
+                cancellationToken
+            );
+
+            var sub4 = await _subscriber.SubscribeAsync(
+                IPCMessageType.REMOVE,
+                x =>
+                {
+                    var removeMessage = (RemoveMessage)x;
+                    RecordDeviceRemoval(removeMessage);
+                    _deviceEventBus.Publish(removeMessage);
                 },
                 cancellationToken
             );
@@ -214,12 +289,17 @@ namespace LGSTrayCore.Managers
             {
                 await sub1.DisposeAsync();
                 await sub2.DisposeAsync();
+                await sub3.DisposeAsync();
+                await sub4.DisposeAsync();
             };
 
             _ = Task.Run(async () =>
             {
                 int fastFailCount = 0;
-                DiagnosticLog.WriteLine($"Native HID watchdog started; stale limit={_messageStaleTimeout.TotalSeconds:f0}s");
+                DiagnosticLog.WriteLine(
+                    $"Native HID watchdog started; heartbeat limit={HeartbeatMessage.StaleAfterSeconds}s " +
+                    $"device stale limit={_messageStaleTimeout.TotalSeconds:f0}s"
+                );
 
                 while (!_cts.Token.IsCancellationRequested)
                 {

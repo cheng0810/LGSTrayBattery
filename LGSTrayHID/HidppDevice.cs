@@ -13,6 +13,7 @@ namespace LGSTrayHID
     {
         private readonly SemaphoreSlim _initSemaphore = new(1, 1);
         private Func<HidppDevice, Task<BatteryUpdateReturn?>>? _getBatteryAsync;
+        private int _removed;
 
         public string DeviceName { get; private set; } = string.Empty;
         public int DeviceType { get; private set; } = 3;
@@ -26,6 +27,7 @@ namespace LGSTrayHID
 
         private readonly byte _deviceIdx;
         public byte DeviceIdx => _deviceIdx;
+        public bool Removed => Volatile.Read(ref _removed) != 0;
 
         private readonly Dictionary<ushort, byte> _featureMap = [];
         public Dictionary<ushort, byte> FeatureMap => _featureMap;
@@ -38,6 +40,7 @@ namespace LGSTrayHID
 
         public async Task InitAsync()
         {
+            if (Removed) { return; }
             await _initSemaphore.WaitAsync();
             try
             {
@@ -244,7 +247,7 @@ namespace LGSTrayHID
             {
                 if (_getBatteryAsync == null) { return; }
 
-                while (true)
+                while (!Removed && !Parent.Disposed)
                 {
                     var now = DateTimeOffset.Now;
 #if DEBUG
@@ -265,6 +268,7 @@ namespace LGSTrayHID
 
         public async Task UpdateBattery(bool forceIpcUpdate = false)
         {
+            if (Removed) { return; }
             if (Parent.Disposed) { return; }
             if (_getBatteryAsync == null) { return; }
 
@@ -299,10 +303,22 @@ namespace LGSTrayHID
 
         private void SignalInit()
         {
+            if (Removed) { return; }
             HidppManagerContext.Instance.SignalDeviceEvent(
                 IPCMessageType.INIT,
-                new InitMessage(Identifier, DeviceName, _getBatteryAsync != null, (DeviceType)DeviceType)
+                new InitMessage(
+                    Identifier,
+                    DeviceName,
+                    _getBatteryAsync != null,
+                    (DeviceType)DeviceType,
+                    DeviceSource.Native
+                )
             );
+        }
+
+        public void MarkRemoved()
+        {
+            Interlocked.Exchange(ref _removed, 1);
         }
     }
 }

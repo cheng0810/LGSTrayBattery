@@ -63,6 +63,16 @@ python .\publish.py --no-zip
 
 The active logs are `LGSTray.log` and `LGSTrayHID.log`. Each log rotates at 1 MB and keeps three archives. `install.ps1` preserves the logs across local upgrades.
 
+### Third improvement batch
+
+- [x] Add a dedicated Native backend heartbeat every 15 seconds, independent of device battery polling.
+- [x] Track backend and device freshness separately in the XML API.
+- [x] Add Native device removal IPC and preserve the last battery value while reporting the device offline.
+- [x] Mark Native devices disconnected while the HID child is restarting, then reconnect them on the next INIT.
+- [x] Add a named mutex so only one `LGSTray.exe` UI and one HID child can run.
+
+The Native backend is considered unavailable after three missed heartbeats (45 seconds). A device removal does not restart a healthy backend. The existing `online` XML field is true only when both `backend_online` and `device_online` are true.
+
 This section describes the fork-specific state. The remaining sections are the upstream usage and feature documentation.
 
 ## How to install
@@ -149,6 +159,10 @@ Device ids starting with `dev` originates from tapping into Logitech GHUB's own 
 | charging        | ✔️   | ✔️     |
 | online          | ✔️   | ✔️     |
 | data_age_seconds| ✔️   | ✔️     |
+| backend_online  | ✔️   | ✔️     |
+| device_online   | ✔️   | ✔️     |
+| disconnect_reason | ✔️ | ✔️     |
+| backend_pid     | ✔️   | ✔️     |
 
 \* - Requires Logitech G Hub Installed
 

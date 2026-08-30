@@ -2,6 +2,7 @@
 using LGSTrayPrimitives;
 
 using System.Xml.Linq;
+using LGSTrayPrimitives.MessageStructs;
 
 namespace LGSTrayCore
 {
@@ -21,6 +22,21 @@ namespace LGSTrayCore
 
         [ObservableProperty]
         private bool _hasBattery = true;
+
+        [ObservableProperty]
+        private DeviceSource _source = DeviceSource.Unknown;
+
+        [ObservableProperty]
+        private bool _isConnected;
+
+        [ObservableProperty]
+        private DateTimeOffset _backendLastHeartbeat = DateTimeOffset.MinValue;
+
+        [ObservableProperty]
+        private int _backendProcessId;
+
+        [ObservableProperty]
+        private DeviceDisconnectReason _disconnectReason = DeviceDisconnectReason.Unknown;
 
         [ObservableProperty]
         [NotifyPropertyChangedFor(nameof(ToolTipString))]
@@ -74,7 +90,15 @@ namespace LGSTrayCore
             var dataAgeSeconds = hasUpdate
                 ? Math.Max(0, (long)(DateTimeOffset.Now - LastUpdate).TotalSeconds)
                 : -1;
-            var online = hasUpdate && dataAgeSeconds <= staleAfterSeconds;
+            var backendOnline = Source switch
+            {
+                DeviceSource.GHub => true,
+                DeviceSource.Native => BackendLastHeartbeat != DateTimeOffset.MinValue &&
+                    (DateTimeOffset.UtcNow - BackendLastHeartbeat).TotalSeconds <= HeartbeatMessage.StaleAfterSeconds,
+                _ => false
+            };
+            var deviceOnline = IsConnected && hasUpdate && dataAgeSeconds <= staleAfterSeconds;
+            var online = backendOnline && deviceOnline;
 
             var document = new XDocument(
                 new XDeclaration("1.0", "UTF-8", null),
@@ -88,7 +112,11 @@ namespace LGSTrayCore
                     new XElement("charging", (PowerSupplyStatus == PowerSupplyStatus.POWER_SUPPLY_STATUS_CHARGING).ToString()),
                     new XElement("last_update", LastUpdate),
                     new XElement("online", online.ToString()),
-                    new XElement("data_age_seconds", dataAgeSeconds)
+                    new XElement("data_age_seconds", dataAgeSeconds),
+                    new XElement("backend_online", backendOnline.ToString()),
+                    new XElement("device_online", deviceOnline.ToString()),
+                    new XElement("disconnect_reason", DisconnectReason.ToString()),
+                    new XElement("backend_pid", BackendProcessId)
                 )
             );
 

@@ -6,7 +6,22 @@ public enum IPCMessageType : byte
 {
     HEARTBEAT = 0,
     INIT,
-    UPDATE
+    UPDATE,
+    REMOVE
+}
+
+public enum DeviceSource : byte
+{
+    Unknown = 0,
+    Native,
+    GHub
+}
+
+public enum DeviceDisconnectReason : byte
+{
+    Unknown = 0,
+    Removed,
+    BackendRestart
 }
 
 public enum IPCMessageRequestType : byte
@@ -16,6 +31,8 @@ public enum IPCMessageRequestType : byte
 
 [Union(0, typeof(InitMessage))]
 [Union(1, typeof(UpdateMessage))]
+[Union(2, typeof(HeartbeatMessage))]
+[Union(3, typeof(RemoveMessage))]
 public abstract class IPCMessage(string deviceId)
 {
     [Key(0)]
@@ -23,7 +40,13 @@ public abstract class IPCMessage(string deviceId)
 }
 
 [MessagePackObject]
-public class InitMessage(string deviceId, string deviceName, bool hasBattery, DeviceType deviceType) : IPCMessage(deviceId)
+public class InitMessage(
+    string deviceId,
+    string deviceName,
+    bool hasBattery,
+    DeviceType deviceType,
+    DeviceSource source = DeviceSource.Unknown
+) : IPCMessage(deviceId)
 {
     [Key(1)]
     public string deviceName = deviceName;
@@ -33,6 +56,9 @@ public class InitMessage(string deviceId, string deviceName, bool hasBattery, De
 
     [Key(3)]
     public DeviceType deviceType = deviceType;
+
+    [Key(4)]
+    public DeviceSource source = source;
 }
 
 [MessagePackObject]
@@ -59,6 +85,26 @@ public class UpdateMessage(
 
     [Key(5)]
     public double Mileage = mileage;
+}
+
+[MessagePackObject]
+public class HeartbeatMessage(string deviceId, DateTimeOffset sentAt, int processId) : IPCMessage(deviceId)
+{
+    public const int IntervalSeconds = 15;
+    public const int StaleAfterSeconds = IntervalSeconds * 3;
+
+    [Key(1)]
+    public DateTimeOffset sentAt = sentAt;
+
+    [Key(2)]
+    public int processId = processId;
+}
+
+[MessagePackObject]
+public class RemoveMessage(string deviceId, DeviceDisconnectReason reason) : IPCMessage(deviceId)
+{
+    [Key(1)]
+    public DeviceDisconnectReason reason = reason;
 }
 
 [MessagePackObject]

@@ -61,6 +61,9 @@ namespace LGSTrayUI
             DeviceName = initMessage.deviceName;
             HasBattery = initMessage.hasBattery;
             DeviceType = initMessage.deviceType;
+            Source = initMessage.source;
+            IsConnected = true;
+            DisconnectReason = DeviceDisconnectReason.Unknown;
         }
 
         public void UpdateState(UpdateMessage updateMessage)
@@ -70,6 +73,20 @@ namespace LGSTrayUI
             BatteryVoltage = updateMessage.batteryMVolt / 1000.0;
             BatteryMileage = updateMessage.Mileage;
             LastUpdate = updateMessage.updateTime;
+            IsConnected = true;
+            DisconnectReason = DeviceDisconnectReason.Unknown;
+        }
+
+        public void RecordBackendHeartbeat(HeartbeatMessage heartbeatMessage)
+        {
+            BackendLastHeartbeat = heartbeatMessage.sentAt;
+            BackendProcessId = heartbeatMessage.processId;
+        }
+
+        public void MarkDisconnected(DeviceDisconnectReason reason)
+        {
+            IsConnected = false;
+            DisconnectReason = reason;
         }
     }
 }

@@ -186,7 +186,8 @@ namespace LGSTrayCore.Managers
                         deviceId,
                         deviceToken["extendedDisplayName"]!.ToString(),
                         (bool) deviceToken["capabilities"]!["hasBatteryStatus"]!,
-                        deviceType
+                        deviceType,
+                        DeviceSource.GHub
                     ));
 
                     _ws?.Send(JsonConvert.SerializeObject(new
