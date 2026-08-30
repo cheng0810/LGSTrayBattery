@@ -26,6 +26,8 @@ public partial class App : Application
         base.OnStartup(e);
 
         Directory.SetCurrentDirectory(AppContext.BaseDirectory);
+        DiagnosticLog.Initialize("LGSTray");
+        DiagnosticLog.WriteLine($"UI starting from {AppContext.BaseDirectory}");
         Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
         CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
         AppDomain.CurrentDomain.UnhandledException += new UnhandledExceptionEventHandler(CrashHandler);
@@ -34,6 +36,7 @@ public partial class App : Application
 
         var builder = Host.CreateEmptyApplicationBuilder(null);
         await LoadAppSettings(builder.Configuration);
+        DiagnosticLog.WriteLine("Application settings loaded");
 
         builder.Services.Configure<AppSettings>(builder.Configuration);
         builder.Services.AddLGSMessagePipe(true);
@@ -52,7 +55,9 @@ public partial class App : Application
         builder.Services.AddHostedService<NotifyIconViewModel>();
 
         var host = builder.Build();
+        DiagnosticLog.WriteLine("UI host built; starting services");
         await host.RunAsync();
+        DiagnosticLog.WriteLine("UI host stopped");
         Dispatcher.InvokeShutdown();
     }
 
@@ -92,6 +97,7 @@ public partial class App : Application
     private void CrashHandler(object sender, UnhandledExceptionEventArgs args)
     {
         Exception e = (Exception)args.ExceptionObject;
+        DiagnosticLog.WriteException("Unhandled UI exception", e);
         long unixTime = DateTimeOffset.Now.ToUnixTimeSeconds();
 
         using StreamWriter writer = new($"./crashlog_{unixTime}.log", false);

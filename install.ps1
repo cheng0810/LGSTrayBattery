@@ -21,6 +21,7 @@ if ($install -ne $defaultInstall) {
 }
 
 $settingsPath = Join-Path $install 'appsettings.toml'
+$logsPath = Join-Path $install 'logs'
 $savedSettings = if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
     Get-Content -LiteralPath $settingsPath -Raw
 } else {
@@ -65,6 +66,10 @@ $processes = Get-Process -Name 'LGSTray', 'LGSTrayHID' -ErrorAction SilentlyCont
 if ($processes) {
     $processes | Stop-Process -Force
     $processes | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+}
+
+if (Test-Path -LiteralPath $logsPath -PathType Container) {
+    Copy-Item -LiteralPath $logsPath -Destination $staging -Recurse -Force
 }
 
 Remove-DirectoryWithRetry $backup

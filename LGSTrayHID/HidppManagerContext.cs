@@ -29,10 +29,7 @@ namespace LGSTrayHID
 
         private static void Log(string message)
         {
-            System.Diagnostics.Debug.WriteLine(message);
-#if DEBUG
-            Console.WriteLine(message);
-#endif
+            LGSTrayPrimitives.DiagnosticLog.WriteLine(message);
         }
 
         static HidppManagerContext()
@@ -52,7 +49,7 @@ namespace LGSTrayHID
                 return;
             }
 
-            Log($"{reason}; restarting native HID service");
+            Log($"Restart requested: {reason}");
             Environment.Exit(2);
         }
 
@@ -60,6 +57,7 @@ namespace LGSTrayHID
         {
             if (hidApiHotPlugEvent == HidApiHotPlugEvent.HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)
             {
+                Log($"HID hotplug arrival: VID_{device->VendorId:X04}&PID_{device->ProductId:X04} interface={device->InterfaceNumber}");
                 _deviceQueue.Add(*device);
             }
 
@@ -120,6 +118,7 @@ namespace LGSTrayHID
         private unsafe int DeviceLeft(HidHotPlugCallbackHandle callbackHandle, HidDeviceInfo* deviceInfo, HidApiHotPlugEvent hidApiHotPlugEvent, nint userData)
         {
             string devPath = (*deviceInfo).GetPath();
+            Log($"HID hotplug removal: VID_{deviceInfo->VendorId:X04}&PID_{deviceInfo->ProductId:X04} interface={deviceInfo->InterfaceNumber}");
 
             lock (_deviceMapLock)
             {
@@ -145,6 +144,7 @@ namespace LGSTrayHID
 
         public void Start(CancellationToken cancellationToken)
         {
+            Log("Registering Logitech HID hotplug callbacks");
             new Thread(async () =>
             {
                 while (!cancellationToken.IsCancellationRequested)
@@ -161,8 +161,9 @@ namespace LGSTrayHID
 
             unsafe
             {
-                HidHotplugRegisterCallback(0x046D, 0x00, HidApiHotPlugEvent.HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED, HidApiHotPlugFlag.HID_API_HOTPLUG_ENUMERATE, EnqueueDevice, IntPtr.Zero, (int*)IntPtr.Zero);
-                HidHotplugRegisterCallback(0x046D, 0x00, HidApiHotPlugEvent.HID_API_HOTPLUG_EVENT_DEVICE_LEFT, HidApiHotPlugFlag.NONE, DeviceLeft, IntPtr.Zero, (int*)IntPtr.Zero);
+                var arrivalResult = HidHotplugRegisterCallback(0x046D, 0x00, HidApiHotPlugEvent.HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED, HidApiHotPlugFlag.HID_API_HOTPLUG_ENUMERATE, EnqueueDevice, IntPtr.Zero, (int*)IntPtr.Zero);
+                var removalResult = HidHotplugRegisterCallback(0x046D, 0x00, HidApiHotPlugEvent.HID_API_HOTPLUG_EVENT_DEVICE_LEFT, HidApiHotPlugFlag.NONE, DeviceLeft, IntPtr.Zero, (int*)IntPtr.Zero);
+                Log($"HID hotplug callbacks registered: arrival={arrivalResult}, removal={removalResult}");
             }
         }
     

@@ -1,5 +1,5 @@
 ﻿using LGSTrayPrimitives.MessageStructs;
-using MessagePack.Resolvers;
+using LGSTrayPrimitives;
 using MessagePipe;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -46,17 +46,71 @@ namespace LGSTrayCore.Managers
         private readonly CancellationTokenSource _cts = new();
         private CancellationTokenSource? _daemonCts;
         private int _deviceMessageCount;
+        private long _lastDeviceMessageUnixMilliseconds;
+        private readonly TimeSpan _messageStaleTimeout;
 
         private readonly IDistributedSubscriber<IPCMessageType, IPCMessage> _subscriber;
         private readonly IPublisher<IPCMessage> _deviceEventBus;
 
         public LGSTrayHIDManager(
             IDistributedSubscriber<IPCMessageType, IPCMessage> subscriber,
-            IPublisher<IPCMessage> deviceEventBus
+            IPublisher<IPCMessage> deviceEventBus,
+            IOptions<AppSettings> appSettings
         )
         {
             _subscriber = subscriber;
             _deviceEventBus = deviceEventBus;
+            var nativeSettings = appSettings.Value.Native;
+            _messageStaleTimeout = TimeSpan.FromSeconds(
+                nativeSettings.PollPeriod + Math.Max(90, nativeSettings.RetryTime * 3)
+            );
+        }
+
+        private async Task MonitorDaemonHealth(Process proc, int messageCountAtStart, CancellationToken cancellationToken)
+        {
+            var startedAt = DateTimeOffset.UtcNow;
+
+            while (!cancellationToken.IsCancellationRequested && !proc.HasExited)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+
+                var messageCount = Volatile.Read(ref _deviceMessageCount);
+                var now = DateTimeOffset.UtcNow;
+                if (messageCount == messageCountAtStart)
+                {
+                    if (now - startedAt >= TimeSpan.FromSeconds(30))
+                    {
+                        DiagnosticLog.WriteLine($"HID watchdog restarting pid={proc.Id}: no device IPC received within 30 seconds");
+                        proc.Kill();
+                        return;
+                    }
+
+                    continue;
+                }
+
+                var lastMessageAt = DateTimeOffset.FromUnixTimeMilliseconds(
+                    Interlocked.Read(ref _lastDeviceMessageUnixMilliseconds)
+                );
+                if (now - lastMessageAt >= _messageStaleTimeout)
+                {
+                    DiagnosticLog.WriteLine(
+                        $"HID watchdog restarting pid={proc.Id}: no device IPC for {(now - lastMessageAt).TotalSeconds:f0} seconds " +
+                        $"(limit={_messageStaleTimeout.TotalSeconds:f0})"
+                    );
+                    proc.Kill();
+                    return;
+                }
+            }
+        }
+
+        private void RecordDeviceMessage(string description)
+        {
+            Interlocked.Increment(ref _deviceMessageCount);
+            Interlocked.Exchange(
+                ref _lastDeviceMessageUnixMilliseconds,
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            );
+            DiagnosticLog.WriteLine($"Received native HID {description}");
         }
 
         private async Task<int> DaemonLoop()
@@ -75,32 +129,48 @@ namespace LGSTrayCore.Managers
                 CreateNoWindow = true
             };
             proc.Start();
+            DiagnosticLog.WriteLine($"Started native HID service pid={proc.Id}");
 
             try
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, _daemonCts.Token);
                 var messageCountAtStart = Volatile.Read(ref _deviceMessageCount);
                 var processExitTask = proc.WaitForExitAsync(cts.Token);
-                var discoveryTimeoutTask = Task.Delay(TimeSpan.FromSeconds(30), cts.Token);
-                var completedTask = await Task.WhenAny(processExitTask, discoveryTimeoutTask);
+                var watchdogTask = MonitorDaemonHealth(proc, messageCountAtStart, cts.Token);
+                var completedTask = await Task.WhenAny(processExitTask, watchdogTask);
 
-                if (completedTask == discoveryTimeoutTask &&
-                    !cts.IsCancellationRequested &&
-                    Volatile.Read(ref _deviceMessageCount) == messageCountAtStart)
+                if (completedTask == watchdogTask)
                 {
-                    proc.Kill();
-                    await proc.WaitForExitAsync(CancellationToken.None);
+                    await watchdogTask;
+                    await processExitTask;
                 }
                 else
                 {
                     await processExitTask;
+                    await cts.CancelAsync();
+                    try
+                    {
+                        await watchdogTask;
+                    }
+                    catch (OperationCanceledException) { }
                 }
             }
-            catch (Exception)
+            catch (OperationCanceledException)
             {
                 if (!proc.HasExited)
                 {
+                    DiagnosticLog.WriteLine($"Stopping native HID service pid={proc.Id} after cancellation");
                     proc.Kill();
+                    await proc.WaitForExitAsync(CancellationToken.None);
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.WriteException($"Native HID service pid={proc.Id} monitor failed", ex);
+                if (!proc.HasExited)
+                {
+                    proc.Kill();
+                    await proc.WaitForExitAsync(CancellationToken.None);
                 }
             }
             finally
@@ -109,6 +179,7 @@ namespace LGSTrayCore.Managers
                 _daemonCts = null;
             }
 
+            DiagnosticLog.WriteLine($"Native HID service pid={proc.Id} exited with code {proc.ExitCode}");
             await Task.Delay(1000);
             return proc.ExitCode;
         }
@@ -119,8 +190,8 @@ namespace LGSTrayCore.Managers
                 IPCMessageType.INIT,
                 x =>
                 {
-                    Interlocked.Increment(ref _deviceMessageCount);
                     var initMessage = (InitMessage)x;
+                    RecordDeviceMessage($"INIT: {initMessage.deviceName} ({initMessage.deviceId})");
                     //_logiDeviceCollection.OnInitMessage(initMessage);
                     _deviceEventBus.Publish(initMessage);
                 },
@@ -131,8 +202,8 @@ namespace LGSTrayCore.Managers
                 IPCMessageType.UPDATE,
                 x =>
                 {
-                    Interlocked.Increment(ref _deviceMessageCount);
                     var updateMessage = (UpdateMessage)x;
+                    RecordDeviceMessage($"UPDATE: {updateMessage.deviceId} battery={updateMessage.batteryPercentage:f0}%");
                     //_logiDeviceCollection.OnUpdateMessage(updateMessage);
                     _deviceEventBus.Publish(updateMessage);
                 },
@@ -148,6 +219,7 @@ namespace LGSTrayCore.Managers
             _ = Task.Run(async () =>
             {
                 int fastFailCount = 0;
+                DiagnosticLog.WriteLine($"Native HID watchdog started; stale limit={_messageStaleTimeout.TotalSeconds:f0}s");
 
                 while (!_cts.Token.IsCancellationRequested)
                 {
@@ -167,7 +239,7 @@ namespace LGSTrayCore.Managers
 
                     if (fastFailCount > 3)
                     {
-                        // Notify user?
+                        DiagnosticLog.WriteLine("Native HID service stopped after four consecutive fast failures");
                         break;
                     }
                 }
@@ -178,6 +250,7 @@ namespace LGSTrayCore.Managers
 
         public Task StopAsync(CancellationToken cancellationToken)
         {
+            DiagnosticLog.WriteLine("Native HID manager stopping");
             _cts.Cancel();
 
             return Task.CompletedTask;
@@ -185,6 +258,7 @@ namespace LGSTrayCore.Managers
 
         public void RediscoverDevices()
         {
+            DiagnosticLog.WriteLine("Manual native HID rediscovery requested");
             _daemonCts?.Cancel();
         }
     }

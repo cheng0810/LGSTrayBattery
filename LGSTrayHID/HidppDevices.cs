@@ -22,6 +22,7 @@ namespace LGSTrayHID
         private const int READ_TIMEOUT = 100;
 
         private readonly Dictionary<ushort, HidppDevice> _deviceCollection = [];
+        private readonly object _deviceCollectionLock = new();
         public IReadOnlyDictionary<ushort, HidppDevice> DeviceCollection => _deviceCollection;
 
         private readonly SemaphoreSlim _semaphore = new(1, 1);
@@ -51,10 +52,7 @@ namespace LGSTrayHID
 
         private static void Log(string message)
         {
-            System.Diagnostics.Debug.WriteLine(message);
-#if DEBUG
-            Console.WriteLine(message);
-#endif
+            LGSTrayPrimitives.DiagnosticLog.WriteLine(message);
         }
 
         public void Dispose()
@@ -133,17 +131,29 @@ namespace LGSTrayHID
             {
                 byte deviceIdx = buffer[1];
                 Log($"HID++ device arrival announce: index={deviceIdx}");
-                if (true || !_deviceCollection.ContainsKey(deviceIdx))
+                HidppDevice? device = null;
+                lock (_deviceCollectionLock)
                 {
-                    _deviceCollection[deviceIdx] = new(this, deviceIdx);
+                    if (!_deviceCollection.ContainsKey(deviceIdx))
+                    {
+                        device = new(this, deviceIdx);
+                        _deviceCollection[deviceIdx] = device;
+                    }
+                }
+
+                if (device != null)
+                {
                     new Thread(async () =>
                     {
                         try
                         {
                             await Task.Delay(1000);
-                            await _deviceCollection[deviceIdx].InitAsync();
+                            await device.InitAsync();
                         }
-                        catch (Exception) { }
+                        catch (Exception ex)
+                        {
+                            LGSTrayPrimitives.DiagnosticLog.WriteException($"Device index {deviceIdx} initialization failed", ex);
+                        }
                     }).Start();
                 }
             }
@@ -358,6 +368,8 @@ namespace LGSTrayHID
 
             if ((numDeviceFound > 0) || (_deviceCollection.Count == 0))
             {
+                var fallbackDevices = new List<HidppDevice>();
+
                 // Some receivers do not send arrival announces reliably; ping known slots.
                 for (byte i = 1; i <= 6; i++)
                 {
@@ -366,14 +378,19 @@ namespace LGSTrayHID
                     if (ping)
                     {
                         var deviceIdx = i;
-                        if (!_deviceCollection.ContainsKey(deviceIdx))
+                        lock (_deviceCollectionLock)
                         {
-                            _deviceCollection[deviceIdx] = new(this, deviceIdx);
+                            if (!_deviceCollection.ContainsKey(deviceIdx))
+                            {
+                                var device = new HidppDevice(this, deviceIdx);
+                                _deviceCollection[deviceIdx] = device;
+                                fallbackDevices.Add(device);
+                            }
                         }
                     }
                 }
 
-                foreach ((_, var device) in _deviceCollection)
+                foreach (var device in fallbackDevices)
                 {
                     await device.InitAsync();
                 }

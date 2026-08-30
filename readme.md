@@ -16,6 +16,7 @@ This repository is a personal fork of [`andyvorld/LGSTrayBattery`](https://githu
 - `705a8da`: restart the Native HID child service when its endpoint fails
 - `174a3d2`: update vulnerable serialization dependencies
 - `b28671e`: retry HID registration after startup, including devices that wake or reconnect later
+- `5bce275`: restart the Native HID child when startup discovery stalls
 
 ### Runtime architecture
 
@@ -34,6 +35,7 @@ The intended local configuration is `GHub.enabled = false` and `Native.enabled =
 - Stable installation target: `%LOCALAPPDATA%\LGSTrayBattery`
 - Startup entry: current-user registry value `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\LGSTrayGUI`
 - Rainmeter skin: `%USERPROFILE%\Documents\Rainmeter\Skins\MouseBattery`
+- Diagnostic logs: `%LOCALAPPDATA%\LGSTrayBattery\logs`
 
 ### First improvement batch
 
@@ -50,6 +52,16 @@ python .\publish.py --no-zip
 ```
 
 `install.ps1` preserves an existing `%LOCALAPPDATA%\LGSTrayBattery\appsettings.toml`, replaces the installed binaries, updates `LGSTrayGUI` in the current-user startup registry key, and starts the application. The script intentionally accepts only the documented local installation target.
+
+### Second improvement batch
+
+- [x] Add separate rotating logs for the UI and Native HID child.
+- [x] Record process lifecycle, HID enumeration, receiver endpoints, device initialization, battery polls, IPC messages and restart reasons.
+- [x] Restart Native HID after 30 seconds when startup produces no device IPC.
+- [x] Restart Native HID when runtime IPC is stale for `pollPeriod + max(90, retryTime * 3)` seconds.
+- [x] Prevent arrival announcements and fallback pings from initializing the same device twice.
+
+The active logs are `LGSTray.log` and `LGSTrayHID.log`. Each log rotates at 1 MB and keeps three archives. `install.ps1` preserves the logs across local upgrades.
 
 This section describes the fork-specific state. The remaining sections are the upstream usage and feature documentation.
 

@@ -14,12 +14,10 @@ namespace LGSTrayHID
 
             HidppManagerContext.Instance.HidppDeviceEvent += async (type, message) =>
             {
-#if DEBUG
                 if (message is InitMessage initMessage)
                 {
-                    Console.WriteLine(initMessage.deviceName);
+                    LGSTrayPrimitives.DiagnosticLog.WriteLine($"Publishing INIT for {initMessage.deviceName} ({initMessage.deviceId})");
                 }
-#endif
 
                 await _publisher.PublishAsync(type, message);
             };
@@ -27,6 +25,7 @@ namespace LGSTrayHID
 
         public Task StartAsync(CancellationToken cancellationToken)
         {
+            LGSTrayPrimitives.DiagnosticLog.WriteLine("Native HID manager service started");
             HidppManagerContext.Instance.Start(cancellationToken);
 
             return Task.CompletedTask;

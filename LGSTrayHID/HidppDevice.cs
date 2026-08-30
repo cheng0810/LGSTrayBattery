@@ -5,11 +5,7 @@ using System.Text;
 
 using static LGSTrayHID.HidppDevices;
 
-#if DEBUG
-using Log = System.Console;
-#else
-using Log = System.Diagnostics.Debug;
-#endif
+using Log = LGSTrayPrimitives.DiagnosticLog;
 
 namespace LGSTrayHID
 {
@@ -274,7 +270,11 @@ namespace LGSTrayHID
 
             var ret = await _getBatteryAsync.Invoke(this);
 
-            if (ret == null) { return; }
+            if (ret == null)
+            {
+                Log.WriteLine($"{DeviceName} battery poll returned no data");
+                return;
+            }
 
             var batStatus = ret.Value;
             lastUpdate = DateTimeOffset.Now;
@@ -290,6 +290,7 @@ namespace LGSTrayHID
             }
 
             lastBatteryReturn = batStatus;
+            Log.WriteLine($"{DeviceName} battery update: {batStatus.batteryPercentage:f0}% status={batStatus.status}");
             HidppManagerContext.Instance.SignalDeviceEvent(
                 IPCMessageType.UPDATE,
                 new UpdateMessage(Identifier, batStatus.batteryPercentage, batStatus.status, batStatus.batteryMVolt, lastUpdate)
