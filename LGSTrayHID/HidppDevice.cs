@@ -287,14 +287,14 @@ namespace LGSTrayHID
             // named-pipe connection was not ready during initial discovery.
             SignalInit();
 
-            if (!forceIpcUpdate && (batStatus == lastBatteryReturn))
-            {
-                // Don't report if no change
-                return;
-            }
-
+            var batteryChanged = batStatus != lastBatteryReturn;
             lastBatteryReturn = batStatus;
-            Log.WriteLine($"{DeviceName} battery update: {batStatus.batteryPercentage:f0}% status={batStatus.status}");
+            var updateKind = batteryChanged || forceIpcUpdate ? "update" : "refresh";
+            Log.WriteLine($"{DeviceName} battery {updateKind}: {batStatus.batteryPercentage:f0}% status={batStatus.status}");
+
+            // A successful poll is also the device liveness signal. Publish it
+            // even when the battery value is unchanged so API freshness does
+            // not expire while the device remains connected.
             HidppManagerContext.Instance.SignalDeviceEvent(
                 IPCMessageType.UPDATE,
                 new UpdateMessage(Identifier, batStatus.batteryPercentage, batStatus.status, batStatus.batteryMVolt, lastUpdate)
