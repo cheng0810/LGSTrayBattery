@@ -2,6 +2,48 @@
 
 A rewrite/combination of my two programs [LGSTrayBattery](https://github.com/andyvorld/LGSTrayBattery) and [LGSTrayBattery_GHUB](https://github.com/andyvorld/LGSTrayBattery_GHUB), which should allow for interaction via both the native HID and Logitech GaminG Hub websockets.
 
+## Fork Status / 此 Fork 狀態
+
+This repository is a personal fork of [`andyvorld/LGSTrayBattery`](https://github.com/andyvorld/LGSTrayBattery). It keeps `upstream` for upstream updates and uses [`cheng0810/LGSTrayBattery`](https://github.com/cheng0810/LGSTrayBattery) as `origin`.
+
+這個 fork 目前主要用來穩定讀取 **Logitech G502 X LIGHTSPEED** 的 Native HID 電量，並透過 `http://localhost:12321` 提供資料給 Rainmeter。日常使用不依賴 G Hub backend。
+
+### Current branch and fixes
+
+- Active branch: `native-g502-fix`
+- Base version: upstream `v3.0.3`
+- `4fc7d2d`: fix Native HID discovery for the G502 receiver
+- `705a8da`: restart the Native HID child service when its endpoint fails
+- `174a3d2`: update vulnerable serialization dependencies
+- `b28671e`: retry HID registration after startup, including devices that wake or reconnect later
+
+### Runtime architecture
+
+Two processes are expected while the application is running. This is normal and does not mean LGSTray was started twice.
+
+| Process | Responsibility |
+|---------|----------------|
+| `LGSTray.exe` | Tray UI, settings, device list and HTTP API |
+| `LGSTrayHID.exe` | Isolated Native HID backend that communicates with Logitech receivers |
+
+The intended local configuration is `GHub.enabled = false` and `Native.enabled = true`. Rainmeter reads the XML device endpoint exposed by `LGSTray.exe`.
+
+### Local deployment
+
+- Development output: `bin/Release/Publish/win-x64/Standalone`
+- Stable installation target: `%LOCALAPPDATA%\LGSTrayBattery`
+- Startup entry: current-user registry value `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\LGSTrayGUI`
+- Rainmeter skin: `%USERPROFILE%\Documents\Rainmeter\Skins\MouseBattery`
+
+### First improvement batch
+
+- [ ] Keep the UI and HID publish outputs isolated so `LGSTrayHID.exe` cannot be overwritten by the UI build.
+- [ ] Add a repeatable installer for the stable local path and update the startup entry.
+- [ ] Let Rainmeter select the mouse by device name instead of a generated device ID.
+- [ ] Expose data freshness in the API and show an offline state instead of a misleading `0%`.
+
+This section describes the fork-specific state. The remaining sections are the upstream usage and feature documentation.
+
 ## How to install
 
 [![GitHub Release](https://img.shields.io/github/v/release/andyvorld/LGSTrayBattery?sort=semver)](https://github.com/andyvorld/LGSTrayBattery/releases/latest)
@@ -146,7 +188,15 @@ disabledDevices = [
 
 
 ## How to Build project
-TBA
+
+Requirements: Python 3 and the .NET 8 SDK.
+
+```powershell
+& 'C:\Program Files\dotnet\dotnet.exe' build .\LGSTrayBattery.sln -c Release
+python .\publish.py --no-zip
+```
+
+Standalone and framework-dependent packages are written under `bin\Release\Publish\win-x64`. The standalone package includes the .NET runtime and is the package used for the local Rainmeter integration.
 
 ## Acknowledgements
 This project began as a task with me messing around with my mouse for battery tracking.
