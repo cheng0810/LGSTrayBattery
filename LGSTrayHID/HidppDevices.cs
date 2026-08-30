@@ -39,7 +39,7 @@ namespace LGSTrayHID
         {
             FullMode = BoundedChannelFullMode.DropOldest,
             SingleReader = true,
-            SingleWriter = true,
+            SingleWriter = false,
         });
 
         private HidDevicePtr _devShort = IntPtr.Zero;
@@ -62,6 +62,20 @@ namespace LGSTrayHID
         private static void Log(string message)
         {
             LGSTrayPrimitives.DiagnosticLog.WriteLine(message);
+        }
+
+        private void DiscardStaleResponses()
+        {
+            var staleResponseCount = 0;
+            while (_channel.Reader.TryRead(out _))
+            {
+                staleResponseCount++;
+            }
+
+            if (staleResponseCount > 0)
+            {
+                Log($"Discarded {staleResponseCount} stale HID++ response(s) before request");
+            }
         }
 
         public void Dispose()
@@ -128,7 +142,9 @@ namespace LGSTrayHID
                     continue;
                 }
 
-                await ProcessMessgage(buffer);
+                // hid_read overwrites this buffer on the next iteration. Queue
+                // an immutable snapshot so consumers never observe later data.
+                await ProcessMessgage(buffer.AsSpan(0, ret).ToArray());
             }
 
             HidClose(dev);
@@ -214,6 +230,8 @@ namespace LGSTrayHID
 
             try
             {
+                DiscardStaleResponses();
+
                 var writeResult = await hidDevicePtr.WriteAsync((byte[])buffer);
                 if (writeResult < 0)
                 {
@@ -231,7 +249,10 @@ namespace LGSTrayHID
                     {
                         ret = await _channel.Reader.ReadAsync(cts.Token);
 
-                        if ((ret[2] == 0x8F) || (ret[2] == buffer[2]))
+                        if ((ret.Length >= 4) &&
+                            (ret[1] == buffer[1]) &&
+                            ((ret[2] == 0x8F) ||
+                             ((ret[2] == buffer[2]) && (ret[3] == buffer[3]))))
                         {
                             return ret;
                         }
@@ -259,6 +280,8 @@ namespace LGSTrayHID
 
             try
             {
+                DiscardStaleResponses();
+
                 var writeResult = await hidDevicePtr.WriteAsync((byte[]) buffer);
                 if (writeResult < 0)
                 {
@@ -282,7 +305,10 @@ namespace LGSTrayHID
                             break;
                         }
 
-                        if ((ret.GetFeatureIndex() == buffer.GetFeatureIndex()) && (ret.GetSoftwareId() == SW_ID))
+                        if ((ret.GetDeviceIdx() == buffer.GetDeviceIdx()) &&
+                            (ret.GetFeatureIndex() == buffer.GetFeatureIndex()) &&
+                            (ret.GetFunctionId() == buffer.GetFunctionId()) &&
+                            (ret.GetSoftwareId() == buffer.GetSoftwareId()))
                         {
                             return ret;
                         }

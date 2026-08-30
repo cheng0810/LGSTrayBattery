@@ -143,20 +143,23 @@ namespace LGSTrayHID
                 }
                 int nameLength = ret.GetParam(0);
 
-                string name = "";
+                var nameBytes = new List<byte>(nameLength);
 
-                while (name.Length < nameLength)
+                while (nameBytes.Count < nameLength)
                 {
-                    ret = await _parent.WriteRead20(_parent.DevShort, new byte[7] { 0x10, _deviceIdx, featureId, 0x10 | SW_ID, (byte)name.Length, 0x00, 0x00 });
+                    ret = await _parent.WriteRead20(_parent.DevShort, new byte[7] { 0x10, _deviceIdx, featureId, 0x10 | SW_ID, (byte)nameBytes.Count, 0x00, 0x00 });
                     if (ret.Length == 0)
                     {
-                        Log.WriteLine($"Device index {_deviceIdx} did not return device-name bytes at offset {name.Length}");
+                        Log.WriteLine($"Device index {_deviceIdx} did not return device-name bytes at offset {nameBytes.Count}");
                         return;
                     }
-                    name += Encoding.UTF8.GetString(ret.GetParams());
+
+                    var nameChunk = ret.GetParams().ToArray();
+                    var bytesRemaining = nameLength - nameBytes.Count;
+                    nameBytes.AddRange(nameChunk[..Math.Min(nameChunk.Length, bytesRemaining)]);
                 }
 
-                DeviceName = name.TrimEnd('\0');
+                DeviceName = Encoding.UTF8.GetString(nameBytes.ToArray()).TrimEnd('\0');
 
                 foreach (var tag in GlobalSettings.settings.DisabledDevices)
                 {
