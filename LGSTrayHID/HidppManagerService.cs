@@ -46,7 +46,12 @@ namespace LGSTrayHID
                 {
                     await _publisher.PublishAsync(
                         IPCMessageType.HEARTBEAT,
-                        new HeartbeatMessage(string.Empty, DateTimeOffset.UtcNow, Environment.ProcessId),
+                        new HeartbeatMessage(
+                            string.Empty,
+                            DateTimeOffset.UtcNow,
+                            Environment.ProcessId,
+                            HidppManagerContext.Instance.DeviceCandidateDetected
+                        ),
                         cancellationToken
                     );
                     await Task.Delay(TimeSpan.FromSeconds(HeartbeatMessage.IntervalSeconds), cancellationToken);

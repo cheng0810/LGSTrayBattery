@@ -399,6 +399,8 @@ namespace LGSTrayHID
 
             if (numDeviceFound > 0)
             {
+                HidppManagerContext.Instance.ReportDeviceCandidate();
+
                 // Force arrival announce
                 ret = await WriteRead10(_devShort, [0x10, 0xFF, 0x80, 0x02, 0x02, 0x00, 0x00], 1000);
             }

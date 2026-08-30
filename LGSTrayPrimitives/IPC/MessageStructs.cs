@@ -88,7 +88,12 @@ public class UpdateMessage(
 }
 
 [MessagePackObject]
-public class HeartbeatMessage(string deviceId, DateTimeOffset sentAt, int processId) : IPCMessage(deviceId)
+public class HeartbeatMessage(
+    string deviceId,
+    DateTimeOffset sentAt,
+    int processId,
+    bool deviceCandidateDetected = false
+) : IPCMessage(deviceId)
 {
     public const int IntervalSeconds = 15;
     public const int StaleAfterSeconds = IntervalSeconds * 3;
@@ -98,6 +103,9 @@ public class HeartbeatMessage(string deviceId, DateTimeOffset sentAt, int proces
 
     [Key(2)]
     public int processId = processId;
+
+    [Key(3)]
+    public bool deviceCandidateDetected = deviceCandidateDetected;
 }
 
 [MessagePackObject]

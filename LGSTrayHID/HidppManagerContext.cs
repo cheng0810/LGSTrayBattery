@@ -17,6 +17,9 @@ namespace LGSTrayHID
         private readonly BlockingCollection<HidDeviceInfo> _deviceQueue = [];
         private readonly object _deviceMapLock = new();
         private int _restartRequested;
+        private int _deviceCandidateDetected;
+
+        public bool DeviceCandidateDetected => Volatile.Read(ref _deviceCandidateDetected) != 0;
 
         public delegate void HidppDeviceEventHandler(IPCMessageType messageType, IPCMessage message);
 
@@ -30,6 +33,11 @@ namespace LGSTrayHID
         private static void Log(string message)
         {
             LGSTrayPrimitives.DiagnosticLog.WriteLine(message);
+        }
+
+        public void ReportDeviceCandidate()
+        {
+            Volatile.Write(ref _deviceCandidateDetected, 1);
         }
 
         static HidppManagerContext()

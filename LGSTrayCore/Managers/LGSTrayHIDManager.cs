@@ -149,6 +149,10 @@ namespace LGSTrayCore.Managers
         private void RecordBackendHeartbeat(HeartbeatMessage heartbeatMessage)
         {
             Volatile.Write(ref _backendHeartbeatProcessId, heartbeatMessage.processId);
+            if (heartbeatMessage.deviceCandidateDetected)
+            {
+                Volatile.Write(ref _deviceDiscoveryCompleted, 1);
+            }
             Interlocked.Exchange(
                 ref _lastBackendHeartbeatUnixMilliseconds,
                 heartbeatMessage.sentAt.ToUnixTimeMilliseconds()
