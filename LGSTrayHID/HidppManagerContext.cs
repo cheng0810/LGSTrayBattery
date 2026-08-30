@@ -15,6 +15,8 @@ namespace LGSTrayHID
         private readonly Dictionary<string, Guid> _containerMap = [];
         private readonly Dictionary<Guid, HidppDevices> _deviceMap = [];
         private readonly BlockingCollection<HidDeviceInfo> _deviceQueue = [];
+        private readonly object _deviceMapLock = new();
+        private int _restartRequested;
 
         public delegate void HidppDeviceEventHandler(IPCMessageType messageType, IPCMessage message);
 
@@ -41,6 +43,17 @@ namespace LGSTrayHID
         public void SignalDeviceEvent(IPCMessageType messageType, IPCMessage message)
         {
             HidppDeviceEvent?.Invoke(messageType, message);
+        }
+
+        public void RequestRestart(string reason)
+        {
+            if (Interlocked.Exchange(ref _restartRequested, 1) != 0)
+            {
+                return;
+            }
+
+            Log($"{reason}; restarting native HID service");
+            Environment.Exit(2);
         }
 
         private unsafe int EnqueueDevice(HidHotPlugCallbackHandle _, HidDeviceInfo* device, HidApiHotPlugEvent hidApiHotPlugEvent, nint __)
@@ -79,10 +92,15 @@ namespace LGSTrayHID
             Console.WriteLine();
 #endif
 
-            if (!_deviceMap.TryGetValue(containerId, out HidppDevices? value))
+            HidppDevices value;
+            lock (_deviceMapLock)
             {
-                value = new();
-                _deviceMap[containerId] = value;
+                if (!_deviceMap.TryGetValue(containerId, out value!))
+                {
+                    value = new();
+                    _deviceMap[containerId] = value;
+                }
+
                 _containerMap[devPath] = containerId;
             }
 
@@ -103,11 +121,23 @@ namespace LGSTrayHID
         {
             string devPath = (*deviceInfo).GetPath();
 
-            if (_containerMap.TryGetValue(devPath, out var containerId))
+            lock (_deviceMapLock)
             {
-                _deviceMap[containerId].Dispose();
-                _deviceMap.Remove(containerId);
-                _containerMap.Remove(devPath);
+                if (_containerMap.TryGetValue(devPath, out var containerId))
+                {
+                    if (_deviceMap.Remove(containerId, out var devices))
+                    {
+                        devices.Dispose();
+                    }
+
+                    foreach (var path in _containerMap
+                        .Where(x => x.Value == containerId)
+                        .Select(x => x.Key)
+                        .ToArray())
+                    {
+                        _containerMap.Remove(path);
+                    }
+                }
             }
 
             return 0;

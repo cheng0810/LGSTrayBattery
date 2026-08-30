@@ -136,8 +136,9 @@ namespace LGSTrayCore.Managers
                     DateTime then = DateTime.Now;
                     int ret = await DaemonLoop();
 
-                    // Daemon returns -1 on .Kill(), assume its user
-                    if ((ret != -1) || (DateTime.Now - then).TotalSeconds < 20)
+                    // Ignore user-requested rediscovery. Stop only if the daemon
+                    // repeatedly fails before it has remained healthy for 20 seconds.
+                    if ((ret != -1) && (DateTime.Now - then).TotalSeconds < 20)
                     {
                         fastFailCount++;
                     }

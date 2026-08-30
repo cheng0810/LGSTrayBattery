@@ -103,7 +103,7 @@ namespace LGSTrayHID
             await SetUp();
         }
 
-        private async Task ReadThread(HidDevicePtr dev, int bufferSize)
+        private async Task ReadThread(HidDevicePtr dev, int bufferSize, string endpointName)
         {
             byte[] buffer = new byte[bufferSize];
             while(_isReading)
@@ -113,6 +113,7 @@ namespace LGSTrayHID
 
                 if (ret < 0)
                 {
+                    HidppManagerContext.Instance.RequestRestart($"HID++ {endpointName} endpoint read failed");
                     break;
                 }
                 else if (ret == 0)
@@ -164,7 +165,12 @@ namespace LGSTrayHID
 
             try
             {
-                await hidDevicePtr.WriteAsync((byte[])buffer);
+                var writeResult = await hidDevicePtr.WriteAsync((byte[])buffer);
+                if (writeResult < 0)
+                {
+                    HidppManagerContext.Instance.RequestRestart("HID++ short endpoint write failed");
+                    return [];
+                }
 
                 CancellationTokenSource cts = new();
                 cts.CancelAfter(timeout);
@@ -204,7 +210,12 @@ namespace LGSTrayHID
 
             try
             {
-                await hidDevicePtr.WriteAsync((byte[]) buffer);
+                var writeResult = await hidDevicePtr.WriteAsync((byte[]) buffer);
+                if (writeResult < 0)
+                {
+                    HidppManagerContext.Instance.RequestRestart("HID++ short endpoint write failed");
+                    return (Hidpp20)Array.Empty<byte>();
+                }
 
                 CancellationTokenSource cts = new();
                 cts.CancelAfter(timeout);
@@ -309,13 +320,13 @@ namespace LGSTrayHID
 #endif
             Log("HID++ endpoints ready");
 
-            Thread t1 = new(async () => { await ReadThread(_devShort, 7); })
+            Thread t1 = new(async () => { await ReadThread(_devShort, 7, "short"); })
             {
                 Priority = ThreadPriority.BelowNormal
             };
             t1.Start();
 
-            Thread t2 = new(async () => { await ReadThread(_devLong, 20); })
+            Thread t2 = new(async () => { await ReadThread(_devLong, 20, "long"); })
             {
                 Priority = ThreadPriority.BelowNormal
             };
