@@ -9,6 +9,8 @@ $ErrorActionPreference = 'Stop'
 $package = [System.IO.Path]::GetFullPath($PackagePath)
 $install = [System.IO.Path]::GetFullPath($InstallPath)
 $defaultInstall = [System.IO.Path]::GetFullPath("$env:LOCALAPPDATA\LGSTrayBattery")
+$staging = [System.IO.Path]::GetFullPath("$env:LOCALAPPDATA\LGSTrayBattery.installing")
+$backup = [System.IO.Path]::GetFullPath("$env:LOCALAPPDATA\LGSTrayBattery.previous")
 
 if (-not (Test-Path -LiteralPath "$package\LGSTray.exe" -PathType Leaf)) {
     throw "LGSTray.exe was not found in package: $package"
@@ -25,16 +27,61 @@ $savedSettings = if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
     $null
 }
 
-Get-Process -Name 'LGSTray', 'LGSTrayHID' -ErrorAction SilentlyContinue |
-    Stop-Process -Force
+function Remove-DirectoryWithRetry([string]$Path) {
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        try {
+            if (Test-Path -LiteralPath $Path) {
+                Remove-Item -LiteralPath $Path -Recurse -Force
+            }
+            return
+        } catch {
+            if ($attempt -eq 10) { throw }
+            Start-Sleep -Milliseconds 300
+        }
+    }
+}
 
-New-Item -ItemType Directory -Path $install -Force | Out-Null
-Get-ChildItem -LiteralPath $install -Force | Remove-Item -Recurse -Force
-Copy-Item -Path "$package\*" -Destination $install -Recurse -Force
+function Move-DirectoryWithRetry([string]$Source, [string]$Destination) {
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        try {
+            Move-Item -LiteralPath $Source -Destination $Destination
+            return
+        } catch {
+            if ($attempt -eq 10) { throw }
+            Start-Sleep -Milliseconds 300
+        }
+    }
+}
+
+Remove-DirectoryWithRetry $staging
+New-Item -ItemType Directory -Path $staging -Force | Out-Null
+Copy-Item -Path "$package\*" -Destination $staging -Recurse -Force
 
 if ($null -ne $savedSettings) {
-    Set-Content -LiteralPath $settingsPath -Value $savedSettings -NoNewline
+    Set-Content -LiteralPath (Join-Path $staging 'appsettings.toml') -Value $savedSettings -NoNewline
 }
+
+$processes = Get-Process -Name 'LGSTray', 'LGSTrayHID' -ErrorAction SilentlyContinue
+if ($processes) {
+    $processes | Stop-Process -Force
+    $processes | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+}
+
+Remove-DirectoryWithRetry $backup
+
+try {
+    if (Test-Path -LiteralPath $install) {
+        Move-DirectoryWithRetry $install $backup
+    }
+    Move-DirectoryWithRetry $staging $install
+} catch {
+    if (-not (Test-Path -LiteralPath $install) -and (Test-Path -LiteralPath $backup)) {
+        Move-DirectoryWithRetry $backup $install
+    }
+    throw
+}
+
+Remove-DirectoryWithRetry $backup
 
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $executable = Join-Path $install 'LGSTray.exe'
