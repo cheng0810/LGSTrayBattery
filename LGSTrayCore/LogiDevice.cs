@@ -84,7 +84,7 @@ namespace LGSTrayCore
             Console.WriteLine(ToolTipString);
         }
 
-        public string GetXmlData(int staleAfterSeconds = 1200)
+        public string GetXmlData(int staleAfterSeconds = 120)
         {
             var hasUpdate = LastUpdate != DateTimeOffset.MinValue;
             var dataAgeSeconds = hasUpdate

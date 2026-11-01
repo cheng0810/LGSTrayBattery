@@ -8,7 +8,7 @@ port = 12321
 useIpv6 = true
 
 # Report a device as offline when its battery data is older than this value
-staleAfterSeconds = 1200
+staleAfterSeconds = 120
 
 [GHub]
 enabled = false
@@ -20,7 +20,7 @@ enabled = true
 retryTime = 10
 
 # Time in seconds to next device poll on sucess
-pollPeriod = 600
+pollPeriod = 30
 
 # List of disabled devices
 disabledDevices = [

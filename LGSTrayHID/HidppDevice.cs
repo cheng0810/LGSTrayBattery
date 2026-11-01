@@ -14,6 +14,23 @@ namespace LGSTrayHID
         private readonly SemaphoreSlim _initSemaphore = new(1, 1);
         private Func<HidppDevice, Task<BatteryUpdateReturn?>>? _getBatteryAsync;
         private int _removed;
+        private readonly SemaphoreSlim _refreshRequested = new(0, 1);
+        private int _batteryFeatureIndex;
+
+        public void RequestBatteryRefresh()
+        {
+            if (Removed || Parent.Disposed) { return; }
+            try { _refreshRequested.Release(); }
+            catch (SemaphoreFullException) { } // Coalesce repeated requests.
+        }
+
+        public bool HandleBatteryNotification(byte featureIndex)
+        {
+            if (featureIndex == 0 || featureIndex != Volatile.Read(ref _batteryFeatureIndex)) { return false; }
+            Log.WriteLine($"{DeviceName} battery notification; requesting refresh");
+            RequestBatteryRefresh();
+            return true;
+        }
 
         public string DeviceName { get; private set; } = string.Empty;
         public int DeviceType { get; private set; } = 3;
@@ -245,6 +262,14 @@ namespace LGSTrayHID
                 _ => null
             };
             Log.WriteLine($"{DeviceName} battery feature: {(_getBatteryAsync == null ? "none" : "found")}");
+            foreach (ushort feature in new ushort[] { 0x1000, 0x1001, 0x1004 })
+            {
+                if (_featureMap.TryGetValue(feature, out var index))
+                {
+                    Volatile.Write(ref _batteryFeatureIndex, index);
+                    break;
+                }
+            }
 
             SignalInit();
 
@@ -275,7 +300,7 @@ namespace LGSTrayHID
 #endif
                     if (now < expectedUpdateTime)
                     {
-                        await Task.Delay((int)(expectedUpdateTime - now).TotalMilliseconds);
+                        await _refreshRequested.WaitAsync(expectedUpdateTime - now);
                     }
 
                     await UpdateBattery();

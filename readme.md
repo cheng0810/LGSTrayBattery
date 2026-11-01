@@ -136,7 +136,7 @@ IPv6 can also be disabled with `useIpv6` in the event that dual stack networking
 
 If any issues arise from running the server, it can be turned off by the `enable` value in `appsettings.toml` under `[HTTPServer]`.
 
-`staleAfterSeconds` controls when the API reports a device as offline. This fork defaults to 1200 seconds, which is longer than the default 600-second Native polling period. An uninitialized device reports `online=False` and `data_age_seconds=-1` until its first successful battery update.
+`staleAfterSeconds` controls when the API reports a device as offline. This fork defaults to 120 seconds, which is longer than the default 30-second Native polling period. An uninitialized device reports `online=False` and `data_age_seconds=-1` until its first successful battery update.
 
 ![image](Assets/server_index.png)
 
@@ -246,3 +246,11 @@ This project began as a task with me messing around with my mouse for battery tr
     - Mouse, By projecthayat, ID, In the Technology & computer hardware Collection
     - Keyboard, By HideMaru, ID, In the Electronic BL.2 Collection
     - Headphones, By Peter Lakenbrink, DE, In the School and Online Learning Glyph Collection
+
+### Responsive Native battery updates
+
+Native polling defaults to 30 seconds, with a 120-second API freshness limit. Existing installations must update their appsettings.toml explicitly.
+
+Use the tray menu **Refresh Battery** to request a Native battery read without restarting the backend. Requests are coalesced and handled by the existing polling loop; the 10-second retry cooldown still applies. Battery-feature notifications also wake this loop, while regular polling remains the fallback for devices that do not send notifications. Notification delivery on G502 X requires an unplug/replug hardware check.
+
+Regression checks: dotnet run --project tests/BatteryRefreshChecks -c Release. Add -- --request-refresh to send a refresh command to a running Native backend; verify its diagnostic log and API last_update.

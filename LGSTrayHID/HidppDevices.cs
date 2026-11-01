@@ -152,6 +152,15 @@ namespace LGSTrayHID
 
         private async Task ProcessMessgage(byte[] buffer)
         {
+            if (buffer.Length < 7) { return; }
+            // Unsolicited HID++ feature events use software ID zero. Never
+            // query from this reader: it must keep receiving the query reply.
+            if ((buffer[3] & 0x0F) == 0 && buffer[2] != 0x41)
+            {
+                HidppDevice? device;
+                lock (_deviceCollectionLock) { _deviceCollection.TryGetValue(buffer[1], out device); }
+                if (device?.HandleBatteryNotification(buffer[2]) == true) { return; }
+            }
             if (buffer[2] == 0x41)
             {
                 byte deviceIdx = buffer[1];

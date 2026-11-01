@@ -13,6 +13,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using LGSTrayPrimitives.IPC;
 
 namespace LGSTrayUI
 {
@@ -87,6 +88,16 @@ namespace LGSTrayUI
         private bool _rediscoverDevicesEnabled = true;
 
         private readonly IEnumerable<IDeviceManager> _deviceManagers;
+
+        [RelayCommand]
+        private async Task RefreshBattery()
+        {
+            try { await BatteryRefreshPipe.RequestAsync(); }
+            catch (Exception ex) when (ex is IOException or OperationCanceledException or TimeoutException)
+            {
+                LGSTrayPrimitives.DiagnosticLog.WriteException("Manual battery refresh failed", ex);
+            }
+        }
 
         public NotifyIconViewModel(
             MainTaskbarIconWrapper mainTaskbarIconWrapper,

@@ -20,7 +20,7 @@ public class HttpServerSettings
 {
     public bool Enabled { get; set; }
     public int Port { get; set; }
-    public int StaleAfterSeconds { get; set; } = 1200;
+    public int StaleAfterSeconds { get; set; } = 120;
 
     private string _addr = null!;
     public string Addr
@@ -42,7 +42,7 @@ public class IDeviceManagerSettings
 public class NativeDeviceManagerSettings : IDeviceManagerSettings
 {
     public int RetryTime { get; set; } = 10;
-    public int PollPeriod { get; set; } = 600;
+    public int PollPeriod { get; set; } = 30;
 
     public IEnumerable<string> DisabledDevices { get; set; } = [];
 }

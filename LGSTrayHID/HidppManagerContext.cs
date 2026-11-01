@@ -187,15 +187,13 @@ namespace LGSTrayHID
             }
         }
     
-        public async Task ForceBatteryUpdates()
+        public void RequestBatteryUpdates()
         {
-            foreach (var (_, hidppDevice) in _deviceMap)
+            HidppDevices[] receivers;
+            lock (_deviceMapLock) { receivers = _deviceMap.Values.ToArray(); }
+            foreach (var receiver in receivers)
             {
-                var tasks = hidppDevice.DeviceCollection
-                    .Select(x => x.Value)
-                    .Select(x => x.UpdateBattery(true));
-
-                await Task.WhenAll(tasks);
+                foreach (var device in receiver.GetDeviceSnapshot()) { device.RequestBatteryRefresh(); }
             }
         }
     }
